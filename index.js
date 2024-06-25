@@ -1,25 +1,28 @@
-const { ApolloServer, gql } = require('apollo-server-express');
-const express = require('express');
-const http = require('http');
-const { PubSub } = require('graphql-subscriptions');
-const { execute, subscribe } = require('graphql');
-const { SubscriptionServer } = require('subscriptions-transport-ws');
-const { makeExecutableSchema } = require('@graphql-tools/schema');
+const { ApolloServer, gql } = require('apollo-server');
 const fs = require('fs');
-
-const pubsub = new PubSub();
-const ACTIVITY_ADDED = 'ACTIVITY_ADDED';
 
 // Carregar dados iniciais
 let activities = JSON.parse(fs.readFileSync('./data/activities.json', 'utf8'));
 
+// Esquema GraphQL
 const typeDefs = gql`
   type Activity {
     id: ID!
     time: String!
     type: String!
-    distance: String!
-    calories: String!
+    distance: Float! # Alterado para Float
+    calories: Float! # Alterado para Float
+    bpm: String!
+    user: String!
+    userImage: String!
+    imageUrl: String!
+  }
+
+  input ActivityInput {
+    time: String!
+    type: String!
+    distance: Float! # Alterado para Float
+    calories: Float! # Alterado para Float
     bpm: String!
     user: String!
     userImage: String!
@@ -31,26 +34,15 @@ const typeDefs = gql`
   }
 
   type Mutation {
-    addActivity(
-      time: String!,
-      type: String!,
-      distance: String!,
-      calories: String!,
-      bpm: String!,
-      user: String!,
-      userImage: String!,
-      imageUrl: String!
-    ): Activity
-  }
-
-  type Subscription {
-    activityAdded: Activity
+    addActivity(input: ActivityInput!): Activity
   }
 `;
 
+// Resolvers
 const resolvers = {
   Query: {
     mockActivities: (_, { user }) => {
+      console.log("Returning activities for user:", user);
       if (user) {
         return activities.filter(activity => activity.user === user);
       }
@@ -58,58 +50,22 @@ const resolvers = {
     },
   },
   Mutation: {
-    addActivity: (_, { time, type, distance, calories, bpm, user, userImage, imageUrl }) => {
+    addActivity: (_, { input }) => {
       const newActivity = {
         id: activities.length + 1,
-        time,
-        type,
-        distance,
-        calories,
-        bpm,
-        user,
-        userImage,
-        imageUrl,
+        ...input,
       };
       activities.push(newActivity);
       fs.writeFileSync('./data/activities.json', JSON.stringify(activities, null, 2));
-      pubsub.publish(ACTIVITY_ADDED, { activityAdded: newActivity });
+      console.log("Added new activity:", newActivity);
       return newActivity;
-    },
-  },
-  Subscription: {
-    activityAdded: {
-      subscribe: () => pubsub.asyncIterator([ACTIVITY_ADDED]),
     },
   },
 };
 
-const schema = makeExecutableSchema({ typeDefs, resolvers });
+// Servidor Apollo
+const server = new ApolloServer({ typeDefs, resolvers });
 
-const app = express();
-const server = http.createServer(app);
-
-const apolloServer = new ApolloServer({
-  schema,
-});
-
-apolloServer.start().then(() => {
-  apolloServer.applyMiddleware({ app });
-
-  const subscriptionServer = SubscriptionServer.create(
-    {
-      schema,
-      execute,
-      subscribe,
-      onConnect: () => console.log('Connected to websocket'),
-    },
-    {
-      server: server,
-      path: '/graphql', 
-    }
-  );
-
-  server.listen(4000, () => {
-    console.log(`🚀 Server ready at http://localhost:4000${apolloServer.graphqlPath}`);
-    console.log(`🚀 Subscriptions ready at ws://localhost:4000/graphql`);
-  });
+server.listen().then(({ url }) => {
+  console.log(`🚀 Server ready at ${url}`);
 });
